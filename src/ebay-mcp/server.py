@@ -7,7 +7,11 @@ from pydantic import AnyUrl
 import logging
 import os
 
-from ebayAPItool import get_access_token, make_ebay_api_request
+from ebayAPItool import (
+    get_access_token,
+    make_ebay_api_request,
+    make_ebay_rest_request,
+)
 
 server = Server("mcp-ebay-server")
 logger = logging.getLogger("mcp-ebay-server")
@@ -49,7 +53,37 @@ async def handle_list_tools() -> list[types.Tool]:
                 },
                 "required": ["query", "ammount"],
             },
-        )
+        ),
+        types.Tool(
+            name="ebay-api-request",
+            description=(
+                "Call any eBay REST API endpoint (Browse, Buy, Order, Inventory, etc.). "
+                "Provide the path starting after the base URL, e.g. "
+                "`/buy/browse/v1/item_summary/search`."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "method": {
+                        "type": "string",
+                        "description": "HTTP method to use (GET, POST, PUT, PATCH, DELETE).",
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "API path, e.g. /buy/browse/v1/item_summary/search.",
+                    },
+                    "params": {
+                        "type": "object",
+                        "description": "Query parameters for the request.",
+                    },
+                    "json_body": {
+                        "type": "object",
+                        "description": "JSON request body for POST/PUT/PATCH requests.",
+                    },
+                },
+                "required": ["method", "path"],
+            },
+        ),
     ]
 
 
@@ -60,33 +94,63 @@ async def handle_call_tool(
     """
     Handle search tool execution requests.
     """
-    if name != "list-auction":
+    if name not in {"list-auction", "ebay-api-request"}:
         raise ValueError(f"Unknown tool: {name}")
 
     if not arguments:
         raise ValueError("Missing arguments")
 
-    query = arguments.get("query")
-
-    ammount = arguments.get("ammount")
-
-    if not query:
-        raise ValueError("Missing query")
-
-    if not ammount:
-        ammount = 1
-
     CLIENT_ID = os.getenv("CLIENT_ID")
     CLIENT_SECRET = os.getenv("CLIENT_SECRET")
-    access_token = get_access_token(CLIENT_ID, CLIENT_SECRET)
-    search_response = make_ebay_api_request(access_token, query, ammount)
 
-    return [
-        types.TextContent(
-            type="text",
-            text=str(search_response),
-        )
-    ]
+    try:
+        access_token = get_access_token(CLIENT_ID, CLIENT_SECRET)
+
+        if name == "list-auction":
+            query = arguments.get("query")
+            ammount = arguments.get("ammount")
+
+            if not query:
+                raise ValueError("Missing query")
+
+            if not ammount:
+                ammount = 1
+
+            search_response = make_ebay_api_request(access_token, query, ammount)
+            response_payload = search_response
+        else:
+            method = arguments.get("method")
+            path = arguments.get("path")
+            params = arguments.get("params")
+            json_body = arguments.get("json_body")
+
+            if not method:
+                raise ValueError("Missing method")
+            if not path:
+                raise ValueError("Missing path")
+
+            response_payload = make_ebay_rest_request(
+                access_token=access_token,
+                method=method,
+                path=path,
+                params=params,
+                json_body=json_body,
+            )
+
+        return [
+            types.TextContent(
+                type="text",
+                text=str(response_payload),
+            )
+        ]
+    except Exception as exc:
+        logger.exception("eBay API call failed")
+        return [
+            types.TextContent(
+                type="text",
+                text=f"Error: {exc}",
+            )
+        ]
 
 
 async def main():
