@@ -50,6 +50,16 @@ async def handle_list_tools() -> list[types.Tool]:
                         "description": "The ammount of results to fetch. This should be a whole non negative number.",
 
                     },
+                    "buying_options": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Buying options to include (e.g., AUCTION, FIXED_PRICE). Defaults to both.",
+                    },
+                    "category_ids": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                        "description": "Optional category IDs to restrict search results.",
+                    },
                 },
                 "required": ["query", "ammount"],
             },
@@ -109,6 +119,8 @@ async def handle_call_tool(
         if name == "list-auction":
             query = arguments.get("query")
             ammount = arguments.get("ammount")
+            buying_options = arguments.get("buying_options")
+            category_ids = arguments.get("category_ids")
 
             if not query:
                 raise ValueError("Missing query")
@@ -116,7 +128,13 @@ async def handle_call_tool(
             if not ammount:
                 ammount = 1
 
-            search_response = make_ebay_api_request(access_token, query, ammount)
+            search_response = make_ebay_api_request(
+                access_token,
+                query,
+                ammount,
+                buying_options=buying_options,
+                category_ids=category_ids,
+            )
             response_payload = search_response
         else:
             method = arguments.get("method")

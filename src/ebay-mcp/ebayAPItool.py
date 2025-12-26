@@ -89,7 +89,13 @@ def get_access_token(CLIENT_ID, CLIENT_SECRET):
     raise RuntimeError(f"Error generating token: {response.status_code} {error_detail}")
 
 # Function to make an authenticated eBay API request
-def make_ebay_api_request(access_token, query=str, ammount=int):
+def make_ebay_api_request(
+    access_token,
+    query=str,
+    ammount=int,
+    buying_options=None,
+    category_ids=None,
+):
     env_name, env_config = get_ebay_environment()
     api_base_url = env_config["api_base_url"]
 
@@ -99,11 +105,16 @@ def make_ebay_api_request(access_token, query=str, ammount=int):
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json",
     }
+    if not buying_options:
+        buying_options = ["AUCTION", "FIXED_PRICE"]
     params = {
         "q": query,
-        "filter": "buyingOptions:{AUCTION}",
+        "filter": f"buyingOptions:{{{'|'.join(buying_options)}}}",
         "limit": ammount,
     }
+    if category_ids:
+        normalized_categories = "|".join(str(category_id) for category_id in category_ids)
+        params["filter"] += f",categoryIds:{{{normalized_categories}}}"
 
     response = requests.get(url, headers=headers, params=params, timeout=30)
     ebay_search_results = []
