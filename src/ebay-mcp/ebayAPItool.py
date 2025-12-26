@@ -8,7 +8,10 @@ import requests
 
 logger = logging.getLogger("mcp-ebay-server")
 
-DEFAULT_OAUTH_SCOPE = "https://api.ebay.com/oauth/api_scope"
+DEFAULT_OAUTH_SCOPES = [
+    "https://api.ebay.com/oauth/api_scope",
+    "https://api.ebay.com/oauth/api_scope/buy.marketplace.insights",
+]
 DEFAULT_TOKEN_FILE = "ebay_token.json"
 
 EBAY_ENVIRONMENTS = {
@@ -39,7 +42,11 @@ def get_access_token(CLIENT_ID, CLIENT_SECRET):
     TOKEN_FILE = os.getenv("EBAY_TOKEN_FILE", DEFAULT_TOKEN_FILE)
     env_name, env_config = get_ebay_environment()
     oauth_url = env_config["oauth_url"]
-    api_scope = os.getenv("EBAY_OAUTH_SCOPE", DEFAULT_OAUTH_SCOPE)
+    raw_scopes = os.getenv("EBAY_OAUTH_SCOPE")
+    if raw_scopes:
+        api_scope = raw_scopes
+    else:
+        api_scope = " ".join(DEFAULT_OAUTH_SCOPES)
 
     logger.info(
         "Generating eBay token using env=%s oauth_url=%s client_id_set=%s client_secret_set=%s",
@@ -224,13 +231,23 @@ def search_sold_listings(
     if sort:
         params["sort"] = sort
 
-    items = _paginate_request(
-        access_token=access_token,
-        path="/buy/marketplace_insights/v1_beta/item_sales/search",
-        params=params,
-        results_key="itemSales",
-        max_results=limit,
-    )
+    try:
+        items = _paginate_request(
+            access_token=access_token,
+            path="/buy/marketplace_insights/v1_beta/item_sales/search",
+            params=params,
+            results_key="itemSales",
+            max_results=limit,
+        )
+    except RuntimeError as exc:
+        message = str(exc)
+        if "403" in message:
+            raise RuntimeError(
+                "Marketplace Insights access denied. Ensure the OAuth scope "
+                "`https://api.ebay.com/oauth/api_scope/buy.marketplace.insights` "
+                "is requested and the app is approved."
+            ) from exc
+        raise
     return [_format_sold_listing(item) for item in items]
 
 
