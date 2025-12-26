@@ -5,6 +5,7 @@ from mcp.server import NotificationOptions, Server
 import mcp.server.stdio
 from pydantic import AnyUrl
 import logging
+import os
 
 from ebayAPItool import get_access_token, make_ebay_api_request
 
@@ -75,9 +76,8 @@ async def handle_call_tool(
     if not ammount:
         ammount = 1
 
-
-    CLIENT_ID = "Your Ebay Client ID"          # App ID (Client ID)
-    CLIENT_SECRET = "Clint Secret"             # Make a Ebay dev acc to get these
+    CLIENT_ID = os.getenv("CLIENT_ID")
+    CLIENT_SECRET = os.getenv("CLIENT_SECRET")
     access_token = get_access_token(CLIENT_ID, CLIENT_SECRET)
     search_response = make_ebay_api_request(access_token, query, ammount)
 
