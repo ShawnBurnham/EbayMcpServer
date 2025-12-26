@@ -9,7 +9,6 @@ import os
 
 from ebayAPItool import (
     get_access_token,
-    make_ebay_api_request,
     make_ebay_rest_request,
     search_active_listings,
     search_sold_listings,
@@ -37,35 +36,6 @@ async def handle_list_tools() -> list[types.Tool]:
     List available search tools.
     """
     return [
-        types.Tool(
-            name="list-auction",
-            description="Scan ebay for auctions. This tool is helpful for finding auctions on ebay.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "The query to search on ebay. This should just be a name not a description.",
-                    },
-                    "ammount": {
-                        "type": "integer",
-                        "description": "The ammount of results to fetch. This should be a whole non negative number.",
-
-                    },
-                    "buying_options": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Buying options to include (e.g., AUCTION, FIXED_PRICE). Defaults to both.",
-                    },
-                    "category_ids": {
-                        "type": "array",
-                        "items": {"type": "integer"},
-                        "description": "Optional category IDs to restrict search results.",
-                    },
-                },
-                "required": ["query", "ammount"],
-            },
-        ),
         types.Tool(
             name="list-active-listings",
             description=(
@@ -172,7 +142,6 @@ async def handle_call_tool(
     Handle search tool execution requests.
     """
     if name not in {
-        "list-auction",
         "list-active-listings",
         "list-sold-listings",
         "ebay-api-request",
@@ -188,27 +157,7 @@ async def handle_call_tool(
     try:
         access_token = get_access_token(CLIENT_ID, CLIENT_SECRET)
 
-        if name == "list-auction":
-            query = arguments.get("query")
-            ammount = arguments.get("ammount")
-            buying_options = arguments.get("buying_options")
-            category_ids = arguments.get("category_ids")
-
-            if not query:
-                raise ValueError("Missing query")
-
-            if not ammount:
-                ammount = 1
-
-            search_response = make_ebay_api_request(
-                access_token,
-                query,
-                ammount,
-                buying_options=buying_options,
-                category_ids=category_ids,
-            )
-            response_payload = search_response
-        elif name == "list-active-listings":
+        if name == "list-active-listings":
             query = arguments.get("query")
             limit = arguments.get("limit")
             buying_options = arguments.get("buying_options")
