@@ -11,6 +11,8 @@ from ebayAPItool import (
     get_access_token,
     make_ebay_api_request,
     make_ebay_rest_request,
+    search_active_listings,
+    search_sold_listings,
 )
 
 server = Server("mcp-ebay-server")
@@ -65,6 +67,71 @@ async def handle_list_tools() -> list[types.Tool]:
             },
         ),
         types.Tool(
+            name="list-active-listings",
+            description=(
+                "Search active eBay listings (auctions + fixed price). "
+                "Returns structured fields like price, currency, and end date when available."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The search query.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of listings to return (paginated).",
+                    },
+                    "buying_options": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Buying options to include (AUCTION, FIXED_PRICE).",
+                    },
+                    "category_ids": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                        "description": "Optional category IDs to restrict search results.",
+                    },
+                    "sort": {
+                        "type": "string",
+                        "description": "Optional sort order (e.g. BEST_MATCH, END_DATE_SOONEST).",
+                    },
+                },
+                "required": ["query", "limit"],
+            },
+        ),
+        types.Tool(
+            name="list-sold-listings",
+            description=(
+                "Search sold eBay listings (Marketplace Insights API). "
+                "Requires the buy.marketplace.insights scope."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The search query.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of sold listings to return (paginated).",
+                    },
+                    "category_ids": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                        "description": "Optional category IDs to restrict search results.",
+                    },
+                    "sort": {
+                        "type": "string",
+                        "description": "Optional sort order (e.g. SOLD_DATE_DESC).",
+                    },
+                },
+                "required": ["query", "limit"],
+            },
+        ),
+        types.Tool(
             name="ebay-api-request",
             description=(
                 "Call any eBay REST API endpoint (Browse, Buy, Order, Inventory, etc.). "
@@ -104,7 +171,12 @@ async def handle_call_tool(
     """
     Handle search tool execution requests.
     """
-    if name not in {"list-auction", "ebay-api-request"}:
+    if name not in {
+        "list-auction",
+        "list-active-listings",
+        "list-sold-listings",
+        "ebay-api-request",
+    }:
         raise ValueError(f"Unknown tool: {name}")
 
     if not arguments:
@@ -136,6 +208,44 @@ async def handle_call_tool(
                 category_ids=category_ids,
             )
             response_payload = search_response
+        elif name == "list-active-listings":
+            query = arguments.get("query")
+            limit = arguments.get("limit")
+            buying_options = arguments.get("buying_options")
+            category_ids = arguments.get("category_ids")
+            sort = arguments.get("sort")
+
+            if not query:
+                raise ValueError("Missing query")
+            if not limit:
+                limit = 50
+
+            response_payload = search_active_listings(
+                access_token=access_token,
+                query=query,
+                limit=limit,
+                buying_options=buying_options,
+                category_ids=category_ids,
+                sort=sort,
+            )
+        elif name == "list-sold-listings":
+            query = arguments.get("query")
+            limit = arguments.get("limit")
+            category_ids = arguments.get("category_ids")
+            sort = arguments.get("sort")
+
+            if not query:
+                raise ValueError("Missing query")
+            if not limit:
+                limit = 50
+
+            response_payload = search_sold_listings(
+                access_token=access_token,
+                query=query,
+                limit=limit,
+                category_ids=category_ids,
+                sort=sort,
+            )
         else:
             method = arguments.get("method")
             path = arguments.get("path")

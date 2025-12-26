@@ -89,6 +89,151 @@ def get_access_token(CLIENT_ID, CLIENT_SECRET):
     raise RuntimeError(f"Error generating token: {response.status_code} {error_detail}")
 
 # Function to make an authenticated eBay API request
+def _build_browse_filters(buying_options=None, category_ids=None):
+    filters = []
+    if buying_options:
+        filters.append(f"buyingOptions:{{{'|'.join(buying_options)}}}")
+    if category_ids:
+        normalized_categories = "|".join(str(category_id) for category_id in category_ids)
+        filters.append(f"categoryIds:{{{normalized_categories}}}")
+    return ",".join(filters)
+
+
+def _extract_price_fields(item):
+    price_data = item.get("currentBidPrice") or item.get("price") or {}
+    return price_data.get("value"), price_data.get("currency")
+
+
+def _format_active_listing(item):
+    price, currency = _extract_price_fields(item)
+    return {
+        "title": item.get("title"),
+        "price": price,
+        "currency": currency,
+        "end_date": item.get("itemEndDate"),
+        "item_url": item.get("itemWebUrl"),
+        "buying_options": item.get("buyingOptions"),
+        "condition": item.get("condition"),
+        "seller_username": item.get("seller", {}).get("username"),
+        "location": item.get("itemLocation", {}).get("postalCode"),
+    }
+
+
+def _format_sold_listing(item):
+    price_data = item.get("price") or {}
+    return {
+        "title": item.get("title"),
+        "price": price_data.get("value"),
+        "currency": price_data.get("currency"),
+        "sold_date": item.get("soldDate"),
+        "item_url": item.get("itemHref"),
+        "condition": item.get("condition"),
+        "seller_username": item.get("seller", {}).get("username"),
+    }
+
+
+def _paginate_request(
+    access_token,
+    path,
+    params,
+    results_key,
+    max_results,
+):
+    env_name, env_config = get_ebay_environment()
+    api_base_url = env_config["api_base_url"]
+    url = f"{api_base_url}{path}"
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+    }
+    collected = []
+    offset = 0
+    page_limit = params.get("limit", 50)
+
+    while len(collected) < max_results:
+        current_limit = min(page_limit, max_results - len(collected))
+        page_params = dict(params)
+        page_params["limit"] = current_limit
+        page_params["offset"] = offset
+
+        response = requests.get(url, headers=headers, params=page_params, timeout=30)
+        if response.status_code >= 400:
+            raise RuntimeError(
+                f"eBay API error: {response.status_code} {response.text} (env={env_name})"
+            )
+
+        payload = response.json()
+        page_items = payload.get(results_key, [])
+        if not page_items:
+            break
+        collected.extend(page_items)
+        if len(page_items) < current_limit:
+            break
+        offset += current_limit
+
+    return collected
+
+
+def search_active_listings(
+    access_token,
+    query,
+    limit,
+    buying_options=None,
+    category_ids=None,
+    sort=None,
+):
+    if not buying_options:
+        buying_options = ["AUCTION", "FIXED_PRICE"]
+    filters = _build_browse_filters(
+        buying_options=buying_options,
+        category_ids=category_ids,
+    )
+    params = {
+        "q": query,
+        "limit": min(limit, 200),
+    }
+    if filters:
+        params["filter"] = filters
+    if sort:
+        params["sort"] = sort
+
+    items = _paginate_request(
+        access_token=access_token,
+        path="/buy/browse/v1/item_summary/search",
+        params=params,
+        results_key="itemSummaries",
+        max_results=limit,
+    )
+    return [_format_active_listing(item) for item in items]
+
+
+def search_sold_listings(
+    access_token,
+    query,
+    limit,
+    category_ids=None,
+    sort=None,
+):
+    filters = _build_browse_filters(category_ids=category_ids)
+    params = {
+        "q": query,
+        "limit": min(limit, 200),
+    }
+    if filters:
+        params["filter"] = filters
+    if sort:
+        params["sort"] = sort
+
+    items = _paginate_request(
+        access_token=access_token,
+        path="/buy/marketplace_insights/v1_beta/item_sales/search",
+        params=params,
+        results_key="itemSales",
+        max_results=limit,
+    )
+    return [_format_sold_listing(item) for item in items]
+
+
 def make_ebay_api_request(
     access_token,
     query=str,
@@ -96,55 +241,16 @@ def make_ebay_api_request(
     buying_options=None,
     category_ids=None,
 ):
-    env_name, env_config = get_ebay_environment()
-    api_base_url = env_config["api_base_url"]
-
-    # Define the eBay Browse API endpoint
-    url = f"{api_base_url}/buy/browse/v1/item_summary/search"
-    headers = {
-        "Authorization": f"Bearer {access_token}",
-        "Content-Type": "application/json",
-    }
-    if not buying_options:
-        buying_options = ["AUCTION", "FIXED_PRICE"]
-    params = {
-        "q": query,
-        "filter": f"buyingOptions:{{{'|'.join(buying_options)}}}",
-        "limit": ammount,
-    }
-    if category_ids:
-        normalized_categories = "|".join(str(category_id) for category_id in category_ids)
-        params["filter"] += f",categoryIds:{{{normalized_categories}}}"
-
-    response = requests.get(url, headers=headers, params=params, timeout=30)
-    ebay_search_results = []
-
-    if response.status_code == 200:
-        results = response.json().get("itemSummaries", [])
-        if not results:
-            return "No auctions found"
-
-        # Format and display the results
-        for item in results:
-            title = item.get("title", "N/A")
-            price =  item.get("currentBidPrice", {}).get("value")
-            currency = item.get("currentBidPrice", {}).get("currency", "N/A")
-            end_date = item.get("itemEndDate", "N/A")
-            
-            # Parse and format the auction end time
-            if end_date != "N/A":
-                end_time = datetime.fromisoformat(end_date[:-1]).strftime("%Y-%m-%d %H:%M:%S")
-            else:
-                end_time = "N/A"
-
-            ebay_search_results.append([title, price, currency, end_date, item.get('itemWebUrl', 'N/A')])
-
-        return ebay_search_results
-
-    error_detail = response.text
-    raise RuntimeError(
-        f"eBay Browse API error: {response.status_code} {error_detail} (env={env_name})"
+    results = search_active_listings(
+        access_token=access_token,
+        query=query,
+        limit=ammount,
+        buying_options=buying_options,
+        category_ids=category_ids,
     )
+    if not results:
+        return "No auctions found"
+    return results
 
 
 def make_ebay_rest_request(
